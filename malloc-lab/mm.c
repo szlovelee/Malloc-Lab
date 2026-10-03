@@ -42,8 +42,6 @@ team_t team = {
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
-
 /* metadata size (bytes) */
 typedef u_int32_t meta_t;
 #define MSIZE (sizeof(meta_t))
@@ -101,7 +99,7 @@ void *mm_malloc(size_t size)
 {
     // 할 것 : 남은 힙 공간 있는지 탐색, sbrk 혹은 가용 리스트에서 배치 -> 정책에 따른 슬라이싱, 헤더 구성
 
-    size_t aligned = ALIGN(size + SIZE_T_SIZE);
+    size_t aligned = ALIGN(size);
     size_t blocksize = BLOCK_SIZE(aligned);
 
     void *ptr = first_fit(blocksize);
@@ -192,7 +190,7 @@ void *mm_realloc(void *ptr, size_t size)
 
     size_t copy_size = GET_SIZE(HEADER_PTR(ptr));
 
-    size_t aligned = ALIGN(size + SIZE_T_SIZE);
+    size_t aligned = ALIGN(size);
     size_t blocksize = BLOCK_SIZE(aligned);
 
     while(GET_SIZE(HEADER_PTR(ptr)) < blocksize){
