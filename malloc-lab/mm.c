@@ -78,7 +78,7 @@ int mm_init(void)
 {
     // 할 것 : 프롤로그와 에필로그 생성, 시작 포인터 저장
     void * allocated = mem_sbrk(16);
-    if (!allocated) { return -1; }
+    if (allocated == (void *) -1) { return -1; }
 
     void *prologue = (char *)allocated + 2 * MSIZE;
     add_metadata(HEADER_PTR(prologue), 8, true);
@@ -92,12 +92,14 @@ int mm_init(void)
 }
 
 /*
- * mm_malloc - Allocate a block by incrementing the brk pointer.
+ * mm_malloc - Allocate a block placed in a free block if there are any available ones that can include the size
+ *     else allocate by incrementing the brk pointer.
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size)
 {
     // 할 것 : 남은 힙 공간 있는지 탐색, sbrk 혹은 가용 리스트에서 배치 -> 정책에 따른 슬라이싱, 헤더 구성
+    if (size <= 0) return NULL;
 
     size_t aligned = ALIGN(size);
     size_t blocksize = BLOCK_SIZE(aligned);
@@ -134,6 +136,7 @@ static void *first_fit(size_t block_size){
   return NULL;
 }
 
+/* increase the brk pointer and return previous brk */
 static void *extend_heap(size_t size)
 {
   void *ptr = mem_sbrk(size);
@@ -174,8 +177,13 @@ static void split(void *ptr, size_t *requested)
 void mm_free(void *ptr)
 {
     // 할 것 : 들어온 ptr 유효성 검사
+    size_t size = GET_SIZE(HEADER_PTR(ptr));
+    add_metadata(HEADER_PTR(ptr), size, false);
+    add_metadata(FOOTER_PTR(ptr, size), size, false);
+
     void *cur = PREV_BLOCK(ptr);
-    if (!try_coalesce(cur)) cur = ptr;
+    if (IS_ALLOCATED(HEADER_PTR(cur))) cur = ptr;
+    else if (!try_coalesce(cur)) cur = ptr;
     try_coalesce(cur);
 }
 
@@ -188,13 +196,14 @@ void *mm_realloc(void *ptr, size_t size)
     // 현재 길이 확인
     // 반복 : 병합. 현재 길이가 충분할 때까지 or 더이상 없을 때까지
 
-    size_t copy_size = GET_SIZE(HEADER_PTR(ptr));
+    size_t copy_size = GET_SIZE(HEADER_PTR(ptr)) - 2 * MSIZE;
 
     size_t aligned = ALIGN(size);
     size_t blocksize = BLOCK_SIZE(aligned);
 
     while(GET_SIZE(HEADER_PTR(ptr)) < blocksize){
       if (!try_coalesce(ptr))
+
         break;
     }
 
@@ -204,10 +213,20 @@ void *mm_realloc(void *ptr, size_t size)
       add_metadata(FOOTER_PTR(ptr, cur_size), cur_size, true);
       return ptr;
     }
+    else{
+      size_t size = BLOCK_SIZE(copy_size);
+      split(ptr, &size);
+    }
 
     void *newptr = mm_malloc(size);
-    if (newptr == NULL)
-        return NULL;
+    
+
+    if (newptr == NULL){
+      size_t cur_size = GET_SIZE(HEADER_PTR(ptr));
+      add_metadata(HEADER_PTR(ptr), cur_size, true);
+      add_metadata(FOOTER_PTR(ptr, cur_size), cur_size, true);
+      return NULL;
+    }
 
     memcpy(newptr, ptr, copy_size);
     mm_free(ptr);
