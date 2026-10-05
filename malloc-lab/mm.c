@@ -44,6 +44,11 @@ team_t team = {
 
 /* metadata size (bytes) */
 typedef u_int32_t meta_t;
+
+#define GET(ptr) (*(meta_t *)(ptr))
+#define PUT(ptr, val) (*(meta_t *)(ptr) = (val))
+#define PACK(size, alloc) ((size) | (alloc))
+
 #define MSIZE (sizeof(meta_t))
 #define HEADER_PTR(ptr) ((char *)(ptr) - MSIZE)
 #define FOOTER_PTR(ptr, size) ((char *)(ptr) + (size) - 2 * MSIZE)
@@ -68,7 +73,6 @@ static void *first_fit(size_t block_size);
 static void *extend_heap(size_t size);
 static void split(void *ptr, size_t *requested);
 static bool try_coalesce(void *ptr);
-static void add_metadata(void *ptr, size_t size, bool allocated);
 
 
 /*
@@ -81,11 +85,12 @@ int mm_init(void)
     if (allocated == (void *) -1) { return -1; }
 
     void *prologue = (char *)allocated + 2 * MSIZE;
-    add_metadata(HEADER_PTR(prologue), 8, true);
-    add_metadata(FOOTER_PTR(prologue, 8), 8, true);
+    meta_t data = PACK(8, true);
+    PUT(HEADER_PTR(prologue), data);
+    PUT(FOOTER_PTR(prologue, 8), data);
 
     void *epilogue = (char *)allocated + 4 * MSIZE;
-    add_metadata(HEADER_PTR(epilogue), 0, true); 
+    PUT(HEADER_PTR(epilogue), PACK(0, true));
 
     heap_base = prologue;
     return 0;
@@ -115,8 +120,10 @@ void *mm_malloc(size_t size)
 
     split(ptr, &blocksize);
     
-    add_metadata(HEADER_PTR(ptr), blocksize, true);
-    add_metadata(FOOTER_PTR(ptr, blocksize), blocksize, true);
+    meta_t data = PACK(blocksize, true);
+    PUT(HEADER_PTR(ptr), data);
+    PUT(FOOTER_PTR(ptr, blocksize), data);
+
     return ptr;
 }
 
@@ -143,11 +150,12 @@ static void *extend_heap(size_t size)
   if (ptr == (void *)-1)
       return NULL;
   
-  add_metadata(HEADER_PTR(ptr), size, false);
-  add_metadata(FOOTER_PTR(ptr, size), size, false);
+  meta_t data = PACK(size, false);
+  PUT(HEADER_PTR(ptr), data);
+  PUT(FOOTER_PTR(ptr, size), data);
 
   // epilogue header
-  add_metadata(NEXT_HEADER_PTR(ptr, size), 0, true);
+  PUT(NEXT_HEADER_PTR(ptr, size), PACK(0, true));
 
   return ptr;
 }
@@ -162,13 +170,15 @@ static void split(void *ptr, size_t *requested)
       return;
     }
 
-    add_metadata(HEADER_PTR(ptr), *requested, false);
-    add_metadata(FOOTER_PTR(ptr, *requested), *requested, false);
+    meta_t data = PACK(*requested, false);
+    PUT(HEADER_PTR(ptr), data);
+    PUT(FOOTER_PTR(ptr, *requested), data);
 
     size_t left = blocksize - *requested;
     void *next = NEXT_BLOCK(ptr, *requested);
-    add_metadata(HEADER_PTR(next), left, false);
-    add_metadata(FOOTER_PTR(next, left), left, false);
+    data = PACK(left, false);
+    PUT(HEADER_PTR(next), data);
+    PUT(FOOTER_PTR(next, left), data);
 }
 
 /*
@@ -178,8 +188,9 @@ void mm_free(void *ptr)
 {
     // 할 것 : 들어온 ptr 유효성 검사
     size_t size = GET_SIZE(HEADER_PTR(ptr));
-    add_metadata(HEADER_PTR(ptr), size, false);
-    add_metadata(FOOTER_PTR(ptr, size), size, false);
+    meta_t data = PACK(size, false);
+    PUT(HEADER_PTR(ptr), data);
+    PUT(FOOTER_PTR(ptr, size), data);
 
     void *cur = PREV_BLOCK(ptr);
     if (IS_ALLOCATED(HEADER_PTR(cur))) cur = ptr;
@@ -209,8 +220,9 @@ void *mm_realloc(void *ptr, size_t size)
 
     if (GET_SIZE(HEADER_PTR(ptr)) >= blocksize){
       size_t cur_size = GET_SIZE(HEADER_PTR(ptr));
-      add_metadata(HEADER_PTR(ptr), cur_size, true);
-      add_metadata(FOOTER_PTR(ptr, cur_size), cur_size, true);
+      meta_t data = PACK(cur_size, true);
+      PUT(HEADER_PTR(ptr), data);
+      PUT(FOOTER_PTR(ptr, cur_size), data);
       return ptr;
     }
     else{
@@ -223,8 +235,9 @@ void *mm_realloc(void *ptr, size_t size)
 
     if (newptr == NULL){
       size_t cur_size = GET_SIZE(HEADER_PTR(ptr));
-      add_metadata(HEADER_PTR(ptr), cur_size, true);
-      add_metadata(FOOTER_PTR(ptr, cur_size), cur_size, true);
+      meta_t data = PACK(cur_size, true);
+      PUT(HEADER_PTR(ptr), data);
+      PUT(FOOTER_PTR(ptr, cur_size), data);
       return NULL;
     }
 
@@ -239,13 +252,9 @@ static bool try_coalesce(void *ptr){
   if (IS_ALLOCATED(HEADER_PTR(next))) return false;
 
   size_t size = GET_SIZE(HEADER_PTR(ptr)) + GET_SIZE(HEADER_PTR(next));
-  add_metadata(HEADER_PTR(ptr), size, false);
-  add_metadata(FOOTER_PTR(ptr, size), size, false);
+  meta_t data = PACK(size, false);
+  PUT(HEADER_PTR(ptr), data);
+  PUT(FOOTER_PTR(ptr, size), data);
 
   return true;
-}
-
-
-static void add_metadata(void *ptr, size_t size, bool allocated){
-    *(meta_t *)ptr = size + allocated;
 }
