@@ -51,8 +51,8 @@ typedef u_int32_t meta_t;
 #define PACK(size, palloc, alloc) ((size) | (palloc << 1) |(alloc))
 
 #define MASK_BSIZE (~UINT32_C(0x7))
-#define MASK_ALLOCATED (0x1)
-#define MASK_PALLOCATED (1<<1)
+#define MASK_ALLOCATED (UINT32_C(0x1))
+#define MASK_PALLOCATED (UINT32_C(1<<1))
 
 /*ptr은 헤더나 푸터를 가리켜야 한다*/
 #define GET_SIZE(ptr) ((MASK_BSIZE & GET(ptr)))
@@ -60,11 +60,17 @@ typedef u_int32_t meta_t;
 #define GET_ALLOC(ptr) (MASK_ALLOCATED & GET(ptr))
 /*ptr은 헤더를 가리켜야 한다*/
 #define GET_PALLOC(ptr) (MASK_PALLOCATED & GET(ptr))
+/*ptr은 헤더나 푸터를 가리켜야 한다*/
+#define SET_ALLOC(ptr, alloc) ((alloc) ? PUT((ptr), GET(ptr) | MASK_ALLOCATED) : PUT((ptr), GET(ptr) & ~MASK_ALLOCATED))
+/*ptr은 헤더나 푸터를 가리켜야 한다*/
+#define SET_PALLOC(ptr, palloc) ((palloc) ? PUT((ptr), GET(ptr) | MASK_PALLOCATED) : PUT((ptr), GET(ptr) & ~MASK_PALLOCATED))
+
 
 #define MSIZE (sizeof(meta_t))
 #define CHUNKSIZE (1<<9)
 #define MIN_BSIZE (ALIGN(MSIZE))
 #define TO_BSIZE(size) (ALIGN((size) + MSIZE))
+
 
 #define HDRP(ptr) ((char *)(ptr) - MSIZE)
 #define FTRP(ptr) ((char *)(ptr) + GET_SIZE(HDRP(ptr)) - 2 * MSIZE)
@@ -73,6 +79,7 @@ typedef u_int32_t meta_t;
 /*use only when !palloc*/
 #define PREV_BLOCK(ptr) ((char *)(ptr) - GET_SIZE(PREV_FTRP(ptr)))
 #define NEXT_BLOCK(ptr) ((char *)(ptr) + GET_SIZE(HDRP(ptr)))
+
 
 static void *heap_base;
 static void *last_search;
@@ -161,7 +168,6 @@ static void *next_fit(size_t requested){
     if (size == 0){
       if (!last_search) return NULL;
       else cur = NEXT_BLOCK(heap_base);
-
       continue;
     }
     
@@ -203,10 +209,8 @@ static void split(void *ptr, size_t requested)
     bool palloc = GET_PALLOC(HDRP(ptr));
 
     if (blocksize < requested + MIN_BSIZE) {
-      PUT(HDRP(ptr), GET(HDRP(ptr)) | 1);
-
-      void *next_hd = NEXT_HDRP(ptr);
-      PUT(next_hd, GET(next_hd) | (1<<1));
+      SET_ALLOC(HDRP(ptr), true);
+      SET_PALLOC(NEXT_HDRP(ptr), true);
       return;
     }
 
@@ -253,7 +257,8 @@ void *mm_realloc(void *ptr, size_t size)
       void *next = NEXT_BLOCK(ptr);
       size_t next_size = GET_SIZE(HDRP(next));
       size_t sum = cur_size + next_size;
-      bool is_last_search = next == last_search;
+
+      bool is_last_search = (next == last_search);
 
       while(!GET_ALLOC(NEXT_HDRP(next)) && sum < blocksize){
         next = NEXT_BLOCK(next);
@@ -266,9 +271,7 @@ void *mm_realloc(void *ptr, size_t size)
       if (sum >= blocksize){
         meta_t data = PACK(sum, palloc, true);
         PUT(HDRP(ptr), data);
-
-        void *next_hd = NEXT_HDRP(ptr);
-        PUT(next_hd, GET(next_hd) | (1 << 1));
+        SET_PALLOC(NEXT_HDRP(ptr), true);
 
         if (is_last_search) last_search = NEXT_BLOCK(ptr);
 
@@ -317,8 +320,7 @@ static void *coalesce(void *ptr){
   PUT(FTRP(block), data);
 
   // 합친 다음 블록
-  void *next_hd = NEXT_HDRP(block);
-  PUT(next_hd, GET(next_hd) & ~(1<<1));
+  SET_PALLOC(NEXT_HDRP(block), false);
 
   return block;
 }
