@@ -60,16 +60,21 @@ typedef u_int32_t meta_t;
 #define GET_ALLOC(ptr) (MASK_ALLOCATED & GET(ptr))
 /*ptr은 헤더를 가리켜야 한다*/
 #define GET_PALLOC(ptr) (MASK_PALLOCATED & GET(ptr))
+
 /*ptr은 헤더나 푸터를 가리켜야 한다*/
 #define SET_ALLOC(ptr, alloc) ((alloc) ? PUT((ptr), GET(ptr) | MASK_ALLOCATED) : PUT((ptr), GET(ptr) & ~MASK_ALLOCATED))
 /*ptr은 헤더나 푸터를 가리켜야 한다*/
 #define SET_PALLOC(ptr, palloc) ((palloc) ? PUT((ptr), GET(ptr) | MASK_PALLOCATED) : PUT((ptr), GET(ptr) & ~MASK_PALLOCATED))
 
+#define GET_PRED(ptr) (((void **)(ptr))[0])  // (*(void **)ptr)
+#define GET_SUCC(ptr) (((void **)(ptr))[1])  // (*((void **)ptr + 1))
+#define SET_PRED(ptr, pred) (((void **)(ptr))[0] = (pred))
+#define SET_SUCC(ptr, succ) (((void **)(ptr))[1] = (succ)) 
 
 #define MSIZE (sizeof(meta_t))
-#define CHUNKSIZE (1<<9)
-#define MIN_BSIZE (ALIGN(MSIZE))
-#define TO_BSIZE(size) (ALIGN((size) + MSIZE))
+#define CHUNKSIZE (1<<8)
+#define MIN_BSIZE (ALIGN(MSIZE * 2 + sizeof(void *) * 2))
+#define TO_BSIZE(size) ((size < sizeof(void *) * 2) ? MIN_BSIZE : ALIGN((size) + MSIZE))
 
 
 #define HDRP(ptr) ((char *)(ptr) - MSIZE)
@@ -82,6 +87,7 @@ typedef u_int32_t meta_t;
 
 
 static void *heap_base;
+static void *free_head;
 static void *last_search;
 
 static void *find_fit(size_t requested);
@@ -90,27 +96,31 @@ static void *next_fit(size_t requested);
 static void *extend_heap(size_t size);
 static void split(void *ptr, size_t requested);
 static void *coalesce(void *ptr);
+static inline void link_fb(void *ptr);
+static inline void unlink_fb(void *ptr);
+
 
 /*
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
-    // 할 것 : 프롤로그와 에필로그 생성, 시작 포인터 저장
-    void * allocated = mem_sbrk(16);
+    void * allocated = mem_sbrk(MIN_BSIZE + 2 * MSIZE);
     if (allocated == (void *) -1) { return -1; }
 
     void *prologue = (char *)allocated + 2 * MSIZE;
-    meta_t data = PACK(8, false, true);
+    meta_t data = PACK(MIN_BSIZE, false, true);
     PUT(HDRP(prologue), data);
 
-    void *epilogue = (char *)allocated + 4 * MSIZE;
+    void *epilogue = NEXT_BLOCK(prologue);
     PUT(HDRP(epilogue), PACK(0, true, true));
+
+    heap_base = prologue;
+    free_head = NULL;
+    last_search = NULL;
 
     if (!extend_heap(0)) { return -1; }
 
-    heap_base = prologue;
-    last_search = NULL;
     return 0;
 }
 
@@ -141,21 +151,17 @@ void *mm_malloc(size_t size)
 }
 
 static void *find_fit(size_t requested){
-    return next_fit(requested);
+    return first_fit(requested);
 }
 
 static void *first_fit(size_t requested){
-  void *cur = heap_base;
-  size_t size;
+  void *cur = free_head;
 
-  do{
-    size = GET_SIZE(HDRP(cur));
+  while(cur){
+    if (GET_SIZE(HDRP(cur)) >= requested) return cur;
 
-    if (!GET_ALLOC(HDRP(cur)) && size >= requested)
-      return cur;
-    else
-      cur = NEXT_BLOCK(cur);
-  } while (size > 0);
+    cur = GET_SUCC(cur);
+  }
 
   return NULL;
 }
@@ -194,25 +200,34 @@ static void *extend_heap(size_t size)
   meta_t data = PACK(min_size, palloc, false);
   PUT(HDRP(ptr), data);
   PUT(FTRP(ptr), data);
+  link_fb(ptr);
 
   // epilogue header
   PUT(NEXT_HDRP(ptr), PACK(0, false, true));
 
-  return ptr;
+  return (ptr);
 }
 
 /* splites the block if the blocksize is big enough */
 static void split(void *ptr, size_t requested)
 {
+    if (!GET_ALLOC(HDRP(ptr))) unlink_fb(ptr);
+
     // 블록 사이즈가 작으면 자르지 않고, 충분히 크면 자르기
     size_t blocksize = GET_SIZE(HDRP(ptr));
     bool palloc = GET_PALLOC(HDRP(ptr));
 
-    if (blocksize < requested + MIN_BSIZE) {
+    if (blocksize < requested * 2){
       SET_ALLOC(HDRP(ptr), true);
       SET_PALLOC(NEXT_HDRP(ptr), true);
       return;
     }
+    // if (blocksize < requested + MIN_BSIZE) {
+    //   SET_ALLOC(HDRP(ptr), true);
+    //   SET_PALLOC(NEXT_HDRP(ptr), true);
+    //   return;
+    // }
+
 
     meta_t data = PACK(requested, palloc, true);
     PUT(HDRP(ptr), data);
@@ -222,6 +237,8 @@ static void split(void *ptr, size_t requested)
     data = PACK(left, true, false);
     PUT(HDRP(next), data);
     PUT(FTRP(next), data);
+
+    link_fb(next);
 }
 
 /*
@@ -230,12 +247,9 @@ static void split(void *ptr, size_t requested)
 void mm_free(void *ptr)
 {
     if (GET_ALLOC(HDRP(ptr))){
-      bool is_last_search = (last_search == ptr 
-        || last_search == NEXT_BLOCK(ptr));
 
-      void *result = coalesce(ptr);
-
-      if (is_last_search) last_search = result;
+      SET_PALLOC(NEXT_HDRP(ptr), false);
+      coalesce(ptr);
     }
 }
 
@@ -255,37 +269,37 @@ void *mm_realloc(void *ptr, size_t size)
 
     if (!GET_ALLOC(NEXT_HDRP(ptr))){
       void *next = NEXT_BLOCK(ptr);
+      unlink_fb(next);
       size_t next_size = GET_SIZE(HDRP(next));
       size_t sum = cur_size + next_size;
-
-      bool is_last_search = (next == last_search);
+      
 
       while(!GET_ALLOC(NEXT_HDRP(next)) && sum < blocksize){
         next = NEXT_BLOCK(next);
         next_size = GET_SIZE(HDRP(next));
         sum += next_size;
-
-        is_last_search = is_last_search || next == last_search;
+        unlink_fb(next);
       }
+
+
+      meta_t data = PACK(sum, palloc, true);
+      PUT(HDRP(ptr), data);
+      SET_PALLOC(NEXT_HDRP(ptr), true);
 
       if (sum >= blocksize){
-        meta_t data = PACK(sum, palloc, true);
-        PUT(HDRP(ptr), data);
-        SET_PALLOC(NEXT_HDRP(ptr), true);
-
-        if (is_last_search) last_search = NEXT_BLOCK(ptr);
-
-        split(ptr, blocksize);
-
+        //split(ptr, blocksize);
         return ptr;
       }
+
     }
     else if (GET_SIZE(NEXT_HDRP(ptr)) == 0){
       void *next = extend_heap(blocksize - cur_size);
-      split(next, blocksize - cur_size);
+      //split(next, blocksize - cur_size);
+      unlink_fb(next);
 
-      meta_t data = PACK(blocksize, palloc, true);
+      meta_t data = PACK(GET_SIZE(HDRP(ptr)) + GET_SIZE(HDRP(next)), palloc, true);
       PUT(HDRP(ptr), data);
+      SET_PALLOC(NEXT_HDRP(ptr), true);
       
       return ptr;
     }
@@ -305,6 +319,7 @@ static void *coalesce(void *ptr){
   
   if (!GET_ALLOC(NEXT_HDRP(ptr))){
     size += GET_SIZE(NEXT_HDRP(ptr));
+    unlink_fb(NEXT_BLOCK(ptr));
   }
 
   bool palloc = GET_PALLOC(HDRP(ptr));
@@ -312,15 +327,50 @@ static void *coalesce(void *ptr){
     block = PREV_BLOCK(ptr);
     palloc = GET_PALLOC(HDRP(block));
     size += GET_SIZE(HDRP(block));
+    unlink_fb(block);
   }
 
   // free 후 합친 블록
   meta_t data = PACK(size, palloc, false);
   PUT(HDRP(block), data);
   PUT(FTRP(block), data);
+  link_fb(block);
 
   // 합친 다음 블록
   SET_PALLOC(NEXT_HDRP(block), false);
 
   return block;
+}
+
+static inline void link_fb(void *ptr){
+  if (!ptr) return;
+
+  if (free_head){
+    SET_PRED(ptr, NULL);
+    SET_SUCC(ptr, free_head);
+    SET_PRED(free_head, ptr);      
+  }
+  else{
+    SET_PRED(ptr, NULL);
+    SET_SUCC(ptr, NULL);
+  }
+
+  free_head = ptr;
+}
+
+static inline void unlink_fb(void *ptr){
+  if (!ptr) return;
+
+  void *pred = GET_PRED(ptr);
+  void *succ = GET_SUCC(ptr);
+  if (pred){
+    SET_SUCC(pred, succ);
+  }
+  else{
+    free_head = succ;
+  }
+
+  if (succ){
+    SET_PRED(succ, pred);
+  }
 }
