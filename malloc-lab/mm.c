@@ -72,9 +72,9 @@ typedef u_int32_t meta_t;
 #define SET_SUCC(ptr, succ) (((void **)(ptr))[1] = (succ)) 
 
 #define MSIZE (sizeof(meta_t))
-#define CHUNKSIZE (1<<8)
-#define MIN_BSIZE (ALIGN(MSIZE * 2 + sizeof(void *) * 2))
-#define TO_BSIZE(size) ((size < sizeof(void *) * 2) ? MIN_BSIZE : ALIGN((size) + MSIZE))
+#define CHUNKSIZE (1<<9)
+#define MIN_BSIZE (ALIGN(MSIZE * 2 + sizeof(void *) * 2)) 
+#define TO_BSIZE(size) ((size < sizeof(void *) * 2) ? MIN_BSIZE : ALIGN(size + MSIZE))
 
 
 #define HDRP(ptr) ((char *)(ptr) - MSIZE)
@@ -85,19 +85,30 @@ typedef u_int32_t meta_t;
 #define PREV_BLOCK(ptr) ((char *)(ptr) - GET_SIZE(PREV_FTRP(ptr)))
 #define NEXT_BLOCK(ptr) ((char *)(ptr) + GET_SIZE(HDRP(ptr)))
 
+#define MIN_SIZE_EXP 6
+#define MAX_SIZE_EXP 13
+#define CLASS_LEN (MAX_SIZE_EXP - MIN_SIZE_EXP + 2)
+#define IND_TO_EXP(index) (index + 6)
+#define EXP_TO_SIZE(exp) (1<< ((exp) - 1)) 
+#define IND_TO_SIZE(index) (EXP_TO_SIZE(IND_TO_EXP(index)))
 
 static void *heap_base;
-static void *free_head;
 static void *last_search;
+static void *free_head;
+static void *free_class[CLASS_LEN];
 
+static void init_classes(void);
 static void *find_fit(size_t requested);
 static void *first_fit(size_t requested);
 static void *next_fit(size_t requested);
+static void *best_fit(size_t requested);
 static void *extend_heap(size_t size);
-static void split(void *ptr, size_t requested);
+static void *place(void *ptr, size_t requested);
 static void *coalesce(void *ptr);
 static inline void link_fb(void *ptr);
 static inline void unlink_fb(void *ptr);
+static inline unsigned int get_index(size_t size);
+static inline size_t align_up(size_t size);
 
 
 /*
@@ -105,6 +116,8 @@ static inline void unlink_fb(void *ptr);
  */
 int mm_init(void)
 {
+    init_classes();
+    
     void * allocated = mem_sbrk(MIN_BSIZE + 2 * MSIZE);
     if (allocated == (void *) -1) { return -1; }
 
@@ -112,16 +125,29 @@ int mm_init(void)
     meta_t data = PACK(MIN_BSIZE, false, true);
     PUT(HDRP(prologue), data);
 
-    void *epilogue = NEXT_BLOCK(prologue);
-    PUT(HDRP(epilogue), PACK(0, true, true));
+    void *initial = mem_sbrk(64);
+    if (initial == (void *) -1) return -1;
 
+    // 작은 요청에 대비. 미리 확보하는 낭비를 너무 크게 하지는 않게
+    data = PACK(64, true, false);
+    PUT(HDRP(initial), data);
+    PUT(FTRP(initial), data);
+    link_fb(initial);
+
+    PUT(NEXT_HDRP(initial), PACK(0, false, true));
+  
     heap_base = prologue;
     free_head = NULL;
     last_search = NULL;
 
-    if (!extend_heap(0)) { return -1; }
-
     return 0;
+}
+
+static void init_classes(void)
+{
+  for (int i = 0; i < CLASS_LEN; i++){
+    free_class[i] = NULL;
+  }
 }
 
 /*
@@ -131,10 +157,9 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    // 할 것 : 남은 힙 공간 있는지 탐색, sbrk 혹은 가용 리스트에서 배치 -> 정책에 따른 슬라이싱, 헤더 구성
     if (size <= 0) return NULL;
 
-    size_t blocksize = TO_BSIZE(size);
+    size_t blocksize = align_up(size);
 
     void *ptr = find_fit(blocksize);
 
@@ -145,13 +170,11 @@ void *mm_malloc(size_t size)
           return NULL;
     }
 
-    split(ptr, blocksize);
-
-    return ptr;
+    return place(ptr, blocksize);
 }
 
 static void *find_fit(size_t requested){
-    return first_fit(requested);
+    return best_fit(requested);
 }
 
 static void *first_fit(size_t requested){
@@ -188,10 +211,46 @@ static void *next_fit(size_t requested){
   return NULL;
 }
 
+static void *best_fit(size_t requested){
+  void *best = NULL;
+  unsigned int index = get_index(requested);
+  void *cur = free_class[index];
+
+  while(index < CLASS_LEN){
+    if (!cur && best) return best; 
+
+    // 대상 리스트 찾기
+    while(!cur && index < CLASS_LEN - 1){
+      cur = free_class[++index];
+    }
+
+    // 대상 리스트가 하나도 없을 때
+    if (!cur) break;
+
+    size_t size = GET_SIZE(HDRP(cur));
+    if (size == requested) return cur;
+    if (size > requested){
+      if (!best) best = cur;
+      else if (GET_SIZE(HDRP(best)) > size) best = cur;
+    }
+
+    cur = GET_SUCC(cur);
+  }
+
+  return best;
+}
+
 /* increase the brk pointer and return previous brk */
 static void *extend_heap(size_t size)
 { 
   size_t min_size = (size > CHUNKSIZE) ? size : CHUNKSIZE;
+
+  // 비슷한 요청이 반복될 때를 대비 -> 고정 길이 CHUNKSIZE로 할당하는 것보다 요청한 크기의 배수로 만들어두는 것이 효과적
+  if (size > MIN_BSIZE && size <CHUNKSIZE){
+    size_t batch_size = size * 8;
+    if (batch_size > min_size) min_size = batch_size;
+  }
+
   void *ptr = mem_sbrk(min_size);
   if (ptr == (void *)-1)
       return NULL;
@@ -202,6 +261,7 @@ static void *extend_heap(size_t size)
   PUT(FTRP(ptr), data);
   link_fb(ptr);
 
+
   // epilogue header
   PUT(NEXT_HDRP(ptr), PACK(0, false, true));
 
@@ -209,36 +269,47 @@ static void *extend_heap(size_t size)
 }
 
 /* splites the block if the blocksize is big enough */
-static void split(void *ptr, size_t requested)
+static void *place(void *ptr, size_t requested)
 {
     if (!GET_ALLOC(HDRP(ptr))) unlink_fb(ptr);
 
     // 블록 사이즈가 작으면 자르지 않고, 충분히 크면 자르기
-    size_t blocksize = GET_SIZE(HDRP(ptr));
-    bool palloc = GET_PALLOC(HDRP(ptr));
+    size_t blocksize = GET_SIZE(HDRP(ptr));  
 
-    if (blocksize < requested * 2){
+    if (blocksize - requested <= MIN_BSIZE){
       SET_ALLOC(HDRP(ptr), true);
       SET_PALLOC(NEXT_HDRP(ptr), true);
-      return;
+      return ptr;
     }
-    // if (blocksize < requested + MIN_BSIZE) {
-    //   SET_ALLOC(HDRP(ptr), true);
-    //   SET_PALLOC(NEXT_HDRP(ptr), true);
-    //   return;
-    // }
 
 
-    meta_t data = PACK(requested, palloc, true);
-    PUT(HDRP(ptr), data);
+    bool palloc = GET_PALLOC(HDRP(ptr));
+    
+    if (requested < blocksize / 2){
+      meta_t data = PACK(requested, palloc, true);
+      PUT(HDRP(ptr), data);
+      
+      void *next = NEXT_BLOCK(ptr);
+      data = PACK(blocksize - requested, true, false);
+      PUT(HDRP(next), data);
+      PUT(FTRP(next), data);
+      link_fb(next);
 
-    size_t left = blocksize - requested;
-    void *next = NEXT_BLOCK(ptr);
-    data = PACK(left, true, false);
-    PUT(HDRP(next), data);
-    PUT(FTRP(next), data);
+      return ptr;
+    }
+    else{
+      meta_t data = PACK(blocksize - requested, palloc, false);
+      PUT(HDRP(ptr), data);
+      PUT(FTRP(ptr), data);
+      link_fb(ptr);
 
-    link_fb(next);
+      void *ret = NEXT_BLOCK(ptr);
+      data = PACK(requested, false, true);
+      PUT(HDRP(ret), data);
+      SET_PALLOC(NEXT_HDRP(ret), true);
+
+      return ret;
+    }
 }
 
 /*
@@ -247,8 +318,6 @@ static void split(void *ptr, size_t requested)
 void mm_free(void *ptr)
 {
     if (GET_ALLOC(HDRP(ptr))){
-
-      SET_PALLOC(NEXT_HDRP(ptr), false);
       coalesce(ptr);
     }
 }
@@ -260,7 +329,7 @@ void *mm_realloc(void *ptr, size_t size)
 {
     bool palloc = GET_PALLOC(HDRP(ptr));
     size_t cur_size = GET_SIZE(HDRP(ptr));
-    size_t blocksize = TO_BSIZE(size);
+    size_t blocksize = align_up(size);
 
 
     if (cur_size >= blocksize){
@@ -272,29 +341,18 @@ void *mm_realloc(void *ptr, size_t size)
       unlink_fb(next);
       size_t next_size = GET_SIZE(HDRP(next));
       size_t sum = cur_size + next_size;
-      
-
-      while(!GET_ALLOC(NEXT_HDRP(next)) && sum < blocksize){
-        next = NEXT_BLOCK(next);
-        next_size = GET_SIZE(HDRP(next));
-        sum += next_size;
-        unlink_fb(next);
-      }
-
 
       meta_t data = PACK(sum, palloc, true);
       PUT(HDRP(ptr), data);
       SET_PALLOC(NEXT_HDRP(ptr), true);
 
       if (sum >= blocksize){
-        //split(ptr, blocksize);
         return ptr;
       }
 
     }
     else if (GET_SIZE(NEXT_HDRP(ptr)) == 0){
-      void *next = extend_heap(blocksize - cur_size);
-      //split(next, blocksize - cur_size);
+      void *next = extend_heap(align_up((blocksize - cur_size)));
       unlink_fb(next);
 
       meta_t data = PACK(GET_SIZE(HDRP(ptr)) + GET_SIZE(HDRP(next)), palloc, true);
@@ -345,17 +403,19 @@ static void *coalesce(void *ptr){
 static inline void link_fb(void *ptr){
   if (!ptr) return;
 
-  if (free_head){
+  void *head = free_class[get_index(GET_SIZE(HDRP(ptr)))];
+
+  if (head){
     SET_PRED(ptr, NULL);
-    SET_SUCC(ptr, free_head);
-    SET_PRED(free_head, ptr);      
+    SET_SUCC(ptr, head);
+    SET_PRED(head, ptr);      
   }
   else{
     SET_PRED(ptr, NULL);
     SET_SUCC(ptr, NULL);
   }
 
-  free_head = ptr;
+  free_class[get_index(GET_SIZE(HDRP(ptr)))] = ptr;
 }
 
 static inline void unlink_fb(void *ptr){
@@ -367,10 +427,37 @@ static inline void unlink_fb(void *ptr){
     SET_SUCC(pred, succ);
   }
   else{
-    free_head = succ;
+    free_class[get_index(GET_SIZE(HDRP(ptr)))] = succ;
   }
 
   if (succ){
     SET_PRED(succ, pred);
   }
+}
+
+static inline unsigned int get_index(size_t size){
+  size_t limit = EXP_TO_SIZE(MIN_SIZE_EXP);
+  unsigned int index = 0;
+
+  while(size > limit && index < CLASS_LEN - 1){
+    limit <<= 1;
+    ++index;
+  }
+
+  return index;
+}
+
+static inline size_t align_up(size_t size){
+  if (size >= EXP_TO_SIZE(MIN_SIZE_EXP) && size < EXP_TO_SIZE(MAX_SIZE_EXP - 1)){
+    size_t upper = EXP_TO_SIZE(MIN_SIZE_EXP);
+    while (upper < size){
+      upper <<= 1;
+    }
+
+    if (size >= upper - upper / 8){   // 조금 더 할당 -> 해제 후 조금 더 큰 요청에서도 사용할 수 있도록.
+      return TO_BSIZE(upper);
+    }  
+  }
+
+  return TO_BSIZE(size);  
 }
