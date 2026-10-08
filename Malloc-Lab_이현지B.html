@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Malloc-Lab · 303호 이현지B</title>
+  <style>
+    :root { --paper:#f5f2eb; --ink:#222622; --muted:#687068; --accent:#be492d; --line:#d8d9ce; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#deded5; color:var(--ink); font-family:"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif; }
+    #viewport { position:relative; height:calc(100dvh - 64px); overflow:hidden; }
+    #deck { position:absolute; width:1280px; height:720px; transform-origin:top left; }
+    .slide { position:absolute; inset:0; padding:64px 80px; background:var(--paper); display:none; }
+    .slide.active { display:block; }
+    .eyebrow { margin:0 0 28px; font-size:19px; letter-spacing:.08em; color:var(--muted); }
+    h1 { font-size:76px; line-height:1.22; font-weight:750; letter-spacing:-.055em; margin:65px 0 30px; }
+    h2 { font-size:46px; line-height:1.25; letter-spacing:-.045em; margin:0 0 30px; font-weight:700; }
+    p { margin:0; }
+    .lead { font-size:29px; line-height:1.6; letter-spacing:-.025em; }
+    .accent { color:var(--accent); }
+    .muted { color:var(--muted); }
+    .footer { position:absolute; bottom:35px; left:80px; right:80px; display:flex; justify-content:space-between; border-top:1px solid var(--line); padding-top:16px; font-size:17px; color:var(--muted); }
+    .cover .lead { font-size:32px; }
+    .cover .byline { margin-top:50px; font-size:23px; color:var(--muted); }
+    .implementation-order { list-style:none; counter-reset:steps; padding:0; margin:32px 0 0; }
+    .implementation-order li { counter-increment:steps; display:grid; grid-template-columns:55px 370px 1fr; gap:20px; align-items:baseline; padding:18px 0; border-top:1px solid var(--line); font-size:25px; line-height:1.5; }
+    .implementation-order li::before { content:counter(steps, decimal-leading-zero); color:var(--accent); font-size:22px; }
+    .implementation-order strong { font-weight:600; }
+    .implementation-order span { color:var(--muted); font-size:23px; }
+    .implementation-order .first-step { font-size:21px; }
+    .evolution { font-size:26px; color:var(--muted); margin-bottom:42px; padding:0 0 22px; border-bottom:1px solid var(--line); }
+    .observations { margin:0; }
+    .observations div { display:grid; grid-template-columns:195px 1fr; gap:30px; margin-top:28px; }
+    dt { font-size:25px; color:var(--muted); }
+    dd { margin:0; font-size:32px; line-height:1.45; letter-spacing:-.03em; }
+    .takeaway { margin-top:42px; font-size:28px; line-height:1.5; color:var(--accent); }
+    table { width:100%; border-collapse:collapse; margin-top:24px; }
+    th { font-weight:500; font-size:20px; text-align:left; color:var(--muted); padding:0 0 17px; }
+    td { font-size:31px; padding:23px 0; border-top:1px solid var(--line); letter-spacing:-.025em; }
+    th:first-child, td:first-child { width:35%; }
+    .caption { font-size:18px; margin-top:16px; color:var(--muted); }
+    .slide:nth-child(3) .takeaway { margin-top:22px; font-size:26px; }
+    .slide:nth-child(3) h2 { margin-bottom:24px; }
+    .example-code { display:grid; grid-template-columns:600px 480px; gap:40px; align-items:start; margin-top:30px; }
+    .example-code table { margin-top:0; }
+    .example-code th { font-size:19px; }
+    .example-code td { font-size:24px; padding:24px 0; }
+    .example-code th:first-child, .example-code td:first-child { width:36%; }
+    .code-label { font-size:19px; color:var(--muted); margin-bottom:15px; }
+    pre { margin:0; font-family:"SFMono-Regular",Consolas,monospace; font-size:20px; line-height:1.8; letter-spacing:-.025em; white-space:pre; }
+    .code-explanation { font-size:22px; line-height:1.5; margin-top:18px; color:var(--accent); }
+    .heuristics { width:100%; margin:8px auto 0; table-layout:fixed; }
+    .heuristics th:first-child, .heuristics td:first-child { width:44%; }
+    .heuristics th { font-size:20px; padding-bottom:14px; }
+    .heuristics td { font-size:24px; line-height:1.45; padding:15px 0; vertical-align:top; }
+    .heuristics td:first-child { padding-right:30px; }
+    .heuristics strong { font-size:22px; font-weight:600; letter-spacing:-.015em; }
+    .heuristics code { display:block; margin-top:5px; font-family:"SFMono-Regular",Consolas,monospace; font-size:18px; color:var(--accent); letter-spacing:-.025em; }
+    .logical h2 { margin-bottom:24px; }
+    .logical .heuristics td { padding:23px 0; }
+    .logical .heuristics td:first-child { padding-right:32px; }
+    .heuristics td:nth-child(2) { font-size:22px; font-weight:400; line-height:1.6; letter-spacing:0; }
+    .trial { display:block; margin-top:7px; font-size:20px; color:var(--muted); }
+    .heuristic-page h2 { margin-bottom:12px; }
+    .heuristic-page .heuristics td { padding:7px 0; }
+    .heuristic-page .heuristics td:first-child { padding-right:32px; }
+    .heuristic-page .heuristics th { padding-bottom:10px; }
+    .heuristics .upper-code { white-space:pre; line-height:1.4; }
+    .heuristics pre.code-block { margin:7px 0 0; padding:6px 10px; border-radius:4px; background:#e9ece5; border:1px solid #dce1d7; font-size:16px; line-height:1.4; letter-spacing:0; }
+    .heuristics pre.code-block code { display:inline; margin:0; font:inherit; color:#303936; }
+    .code-block .kw { color:#744084; }
+    .code-block .fn { color:#226477; }
+    .code-block .num { color:#a34526; }
+    .code-note { display:block; font-size:18px; color:var(--muted); margin-top:6px; }
+    .closing-page h2 { font-size:44px; line-height:1.3; }
+    .closing-page .closing { margin-top:34px; }
+    .closing { margin-top:58px; max-width:1050px; }
+    .result-note { font-size:20px; line-height:1.5; color:var(--muted); margin-top:36px; }
+    .lesson { font-size:33px; line-height:1.55; letter-spacing:-.03em; padding-top:4px; }
+    .lesson p + p { margin-top:25px; }
+    .caveat { position:absolute; bottom:114px; font-size:20px; color:var(--muted); }
+    nav { height:64px; display:flex; align-items:center; justify-content:center; gap:13px; background:var(--paper); border-top:1px solid var(--line); }
+    button { font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:4px; cursor:pointer; }
+    button:hover, button:focus-visible { background:#e8e7de; }
+    button:disabled { opacity:.35; cursor:default; }
+    #counter { font-size:14px; min-width:50px; text-align:center; }
+    .help { font-size:12px; color:var(--muted); margin-left:12px; }
+    #notes { display:none; position:fixed; z-index:3; left:50%; bottom:78px; transform:translateX(-50%); width:min(900px,94vw); padding:24px 28px; background:#fffef9; color:var(--ink); box-shadow:0 8px 48px #0003; border:1px solid var(--line); border-radius:6px; }
+    #notes.open { display:block; }
+    #notes h3 { margin:0 0 12px; font-size:17px; color:var(--accent); }
+    #notes p { font-size:18px; line-height:1.8; word-break:keep-all; }
+    #notes .source { font-size:12px; color:var(--muted); margin-top:14px; }
+    @media(max-width:650px) { .help { display:none; } nav { gap:5px; } button { padding:8px; font-size:12px; } #notes p { font-size:15px; } }
+    @media print {
+      @page { size:landscape; margin:0; }
+      body { background:var(--paper); }
+      #viewport { height:auto; overflow:visible; }
+      #deck { position:static; width:100%; height:auto; transform:none!important; }
+      .slide, .slide.active { display:block; position:relative; width:100vw; height:100vh; padding:8vh 6vw; break-after:page; page-break-after:always; overflow:hidden; }
+      .slide:last-child { break-after:auto; page-break-after:auto; }
+      h1 { font-size:6vw; margin-top:8vh; } h2 { font-size:3.6vw; }
+      .eyebrow { font-size:1.5vw; margin-bottom:3vh; }
+      .lead, .cover .lead { font-size:2.3vw; }
+      .cover .byline { font-size:1.8vw; margin-top:6vh; }
+      .implementation-order { margin-top:4vh; }
+      .implementation-order li { grid-template-columns:4vw 29vw 1fr; gap:1.5vw; padding:2vh 0; font-size:1.95vw; }
+      .implementation-order li::before { font-size:1.7vw; }
+      .implementation-order span { font-size:1.8vw; }
+      .implementation-order .first-step { font-size:1.65vw; }
+      .evolution { font-size:2vw; margin-bottom:4vh; }
+      .observations div { grid-template-columns:16vw 1fr; gap:2vw; margin-top:3vh; }
+      dt { font-size:1.9vw; } dd { font-size:2.5vw; }
+      .takeaway { font-size:2.2vw; margin-top:5vh; }
+      th { font-size:1.5vw; } td { font-size:2.4vw; padding:3vh 0; }
+      .caption { font-size:1.4vw; }
+      .slide:nth-child(3) h2 { margin-bottom:3vh; }
+      .example-code { grid-template-columns:47vw 38vw; gap:3vw; margin-top:3vh; }
+      .example-code th, .code-label { font-size:1.5vw; }
+      .example-code td { font-size:1.9vw; padding:3vh 0; }
+      pre { font-size:1.55vw; }
+      .code-explanation { font-size:1.7vw; margin-top:2vh; }
+      .slide:nth-child(3) .takeaway { font-size:2vw; margin-top:2vh; }
+      .heuristics th { font-size:1.5vw; padding-bottom:2vh; }
+      .heuristics td { font-size:1.85vw; padding:2vh 0; }
+      .heuristics { width:100%; margin-left:auto; margin-right:auto; }
+      .heuristics strong { font-size:1.7vw; }
+      .heuristics code { font-size:1.4vw; }
+      .logical h2 { margin-bottom:3vh; }
+      .logical .heuristics td { padding:3vh 0; }
+      .logical .heuristics td:first-child { padding-right:2.5vw; }
+      .heuristics td:nth-child(2) { font-size:1.7vw; }
+      .trial { font-size:1.55vw; margin-top:1vh; }
+      .heuristic-page h2 { margin-bottom:1.5vh; }
+      .heuristic-page .heuristics td { padding:1vh 0; }
+      .heuristic-page .heuristics td:first-child { padding-right:2.5vw; }
+      .heuristics pre.code-block { font-size:1.25vw; padding:.8vh .8vw; }
+      .heuristic-page .heuristics th { padding-bottom:1.5vh; }
+      .code-note { font-size:1.4vw; }
+      .closing-page h2 { font-size:3.4vw; }
+      .closing-page .closing { margin-top:4vh; }
+      .closing { margin-top:6vh; }
+      .result-note, .caveat { font-size:1.6vw; } .lesson { font-size:2.6vw; }
+      .caveat { bottom:15vh; }
+      .footer { bottom:4vh; left:6vw; right:6vw; font-size:1.3vw; }
+      nav, #notes { display:none!important; }
+    }
+  </style>
+</head>
+<body>
+  <main id="viewport" aria-label="malloc 2분 발표">
+    <div id="deck">
+      <section class="slide cover active" aria-label="1장 이번 주에 배운 malloc">
+        <p class="eyebrow">이번 주 학습 공유</p>
+        <h1>Malloc-Lab</h1>
+        <p class="lead"><span class="accent">구조</span>로 설명할 수 있는 개선과<br><span class="accent">실험</span>으로 선택한 정책</p>
+        <p class="byline">303호 이현지B</p>
+        <div class="footer"><span>C로 직접 구현한 메모리 할당기</span><span>01 / 05</span></div>
+      </section>
+      <section class="slide" aria-label="2장 구현 순서">
+        <p class="eyebrow">구현 과정</p>
+        <h2>구현 순서</h2>
+        <ol class="implementation-order">
+          <li><strong>기본 기능 구현</strong><span class="first-step">교과서 없이 할당·해제·분할·병합·realloc 구현<br>이후 교과서를 바탕으로 매크로 재구성</span></li>
+          <li><strong>메타데이터와 탐색 개선</strong><span>footer 생략, next-fit 적용</span></li>
+          <li><strong>명시적 가용 리스트</strong><span>가용 블록만 연결해서 탐색</span></li>
+          <li><strong>크기별 분리 리스트</strong><span>크기별 분류, best-fit 탐색</span></li>
+          <li><strong>정책 조정과 검증</strong><span>크기 보정·확장량·분할 위치 실험</span></li>
+        </ol>
+        <div class="footer"><span></span><span>02 / 05</span></div>
+      </section>
+      <section class="slide logical" aria-label="3장 논리적 개선">
+        <p class="eyebrow">01 · 논리적으로 효과를 설명할 수 있는 개선</p>
+        <h2>공간과 작업 줄이기</h2>
+        <table class="heuristics" aria-label="논리적 개선과 효과의 근거">
+          <thead><tr><th>구현한 개선</th><th>효과의 근거</th></tr></thead>
+          <tbody>
+            <tr><td><strong>할당 블록의 footer 생략</strong><pre class="code-block"><code><span class="fn">GET_PALLOC</span>(<span class="fn">HDRP</span>(ptr))</code></pre></td><td>이전 블록이 free일 때만 footer가 필요<br>할당 블록의 메타데이터 저장 공간 감소</td></tr>
+            <tr><td><strong>best-fit의 상위 클래스 탐색 중단</strong><pre class="code-block"><code><span class="kw">if</span> (!cur &amp;&amp; best) <span class="kw">return</span> best;</code></pre></td><td>후보를 찾은 클래스의 검사를 마치면<br>더 큰 클래스에는 더 작은 후보가 없음</td></tr>
+            <tr><td><strong>realloc을 제자리에서 확장</strong><pre class="code-block"><code><span class="kw">if</span> (sum &gt;= blocksize) <span class="kw">return</span> ptr;</code></pre></td><td>뒤의 가용 블록과 합쳐 충분하면<br>새 할당과 기존 payload 복사를 생략</td></tr>
+          </tbody>
+        </table>
+        <div class="footer"><span>전제를 유지하면 특정 저장 공간·작업을 줄일 수 있음</span><span>03 / 05</span></div>
+      </section>
+      <section class="slide heuristic-page" aria-label="4장 휴리스틱과 적용 이유">
+        <p class="eyebrow">02 · 경험적으로 선택한 정책</p>
+        <h2>요청 패턴에 맞춘 휴리스틱</h2>
+        <table class="heuristics" aria-label="할당 휴리스틱과 효과를 기대한 이유">
+          <thead><tr><th>적용한 정책과 코드 요약</th><th>효과를 기대한 이유</th></tr></thead>
+          <tbody>
+            <tr><td><strong>2의 거듭제곱에 가까운 요청 보정</strong><pre class="code-block"><code><span class="kw">size_t</span> upper = <span class="num">32</span>;
+<span class="kw">while</span> (upper &lt; size) upper &lt;&lt;= <span class="num">1</span>;
+<span class="kw">if</span> (size &gt;= upper - upper / <span class="num">8</span>)
+  <span class="kw">return</span> <span class="fn">TO_BSIZE</span>(upper);</code></pre></td><td>요청 이상인 최소 2의 거듭제곱을 찾고,<br>그 값의 7/8 이상이면 상한 크기로 보정<br>해제 후 조금 더 큰 요청에도 재사용 가능<span class="trial">112 B 요청: upper = 128, 블록 = 136 B</span></td></tr>
+            <tr><td><strong>중간 크기 요청은 여러 개 분량 확보</strong><pre class="code-block"><code>batch_size = size * <span class="num">8</span>;</code></pre></td><td>비슷한 요청이 반복되면 힙 확장 횟수 감소<br>요청 단위에 맞춰 잔여 공간의 배치 조정</td></tr>
+            <tr><td><strong>초기 가용 공간은 작게 확보</strong><pre class="code-block"><code>initial = <span class="fn">mem_sbrk</span>(<span class="num">64</span>);</code></pre></td><td>초반의 작은 요청을 처리할 여유를 두면서<br>처음부터 크게 확보하는 낭비를 줄임</td></tr>
+            <tr><td><strong>요청 비율에 따라 앞·뒤 분할</strong><pre class="code-block"><code>requested &lt; blocksize / <span class="num">2</span></code></pre></td><td>잔여 공간의 위치와 병합 기회를 조정<br>실험했지만 개선 효과는 일정하지 않았음</td></tr>
+          </tbody>
+        </table>
+        <div class="footer"><span>효과는 요청 패턴에 따라 달라짐 · 8배, 64 B, 분할 기준은 실험으로 선택</span><span>04 / 05</span></div>
+      </section>
+      <section class="slide closing-page" aria-label="5장 결과와 배운 점">
+        <p class="eyebrow">이번 주의 결론</p>
+        <h2>근거 기반의 선택과<br>측정 기반의 선택을 함께 적용</h2>
+        <div class="closing">
+          <div class="lesson">
+            <p><strong>논리적 개선</strong>은 줄어드는 작업과<br>유지해야 하는 전제를 확인했다</p>
+            <p><span class="accent">휴리스틱</span>은 요청 패턴에 따른 효과를<br>개별 테스트로 확인하고 조정했다</p>
+          </div>
+          <p class="result-note">참고 결과: 제공된 11개 traces 통과, 로컬 드라이버 99 / 100</p>
+        </div>
+        <p class="caveat">이 결과가 모든 프로그램에서의 최적을 의미하지는 않는다</p>
+        <div class="footer"><span>이용률과 처리량을 함께 측정하며 정책 조정</span><span>05 / 05</span></div>
+      </section>
+    </div>
+  </main>
+  <nav aria-label="발표 조작">
+    <button id="prev" aria-label="이전 슬라이드">이전</button>
+    <span id="counter" aria-live="polite">1 / 5</span>
+    <button id="next" aria-label="다음 슬라이드">다음</button>
+    <button id="toggleNotes" aria-expanded="false" aria-controls="notes">대본 N</button>
+    <button id="fullscreen">전체 화면 F</button>
+    <span class="help">← → 이동 · Home / End · 인쇄 시 5장 출력</span>
+  </nav>
+  <aside id="notes" aria-label="현재 슬라이드 발표 대본" aria-hidden="true">
+    <h3 id="noteTitle"></h3><p id="noteText"></p><p class="source" id="noteSource"></p>
+  </aside>
+  <script>
+    const slides = [...document.querySelectorAll('.slide')];
+    const scripts = [
+      {
+        time:'약 10초',
+        text:'이번 주에는 C로 malloc을 구현했습니다. 구조적으로 효과를 설명할 수 있는 개선과, 실험으로 골라야 하는 정책을 나눠서 공유하겠습니다.',
+        source:'구현: malloc-lab/mm.c'
+      },
+      {
+        time:'약 15초',
+        text:'처음에는 교과서 없이 기본 기능을 구현했고, 이후 교과서를 바탕으로 매크로를 재구성했습니다. footer 생략과 next-fit을 적용한 뒤 명시적 리스트, 크기별 분리 리스트로 바꿨고, 마지막에는 크기 보정과 확장량 등을 조정했습니다.',
+        source:'구현 순서 근거: bcafb21 기본 동작 · f36a9a2 footer 생략 상태에서 next-fit 적용 · 39cd25f 명시적 리스트 · 1ce4cfb 분리 리스트와 align_up · 후속 조정은 현재 코드와 구현 과정'
+      },
+      {
+        time:'약 40초',
+        text:'먼저 줄어드는 공간이나 작업이 분명한 개선입니다. 할당된 블록은 footer를 없애고, 다음 헤더의 이전 블록 상태 비트로 해제 여부를 구분했습니다. 분리 리스트에서는 후보를 찾은 클래스의 검사를 마친 뒤 더 큰 클래스를 볼 필요가 없었습니다. 크기 범위상 더 작은 후보가 없기 때문입니다. realloc도 뒤의 가용 블록과 합쳐 충분하면 기존 주소를 유지해서 새 할당과 payload 복사를 생략할 수 있습니다.',
+        source:'현재 코드: GET_PALLOC, best_fit, mm_realloc · footer 4 B 생략이 정렬 때문에 모든 블록의 실제 크기를 4 B 줄이는 것은 아님'
+      },
+      {
+        time:'약 40초',
+        text:'반면 이 정책들은 실험으로 골랐습니다. 먼저 upper를 두 배씩 늘려 요청 이상인 최소 2의 거듭제곱을 찾습니다. 요청이 그 값에 가까우면 크기를 올려서, 해제 후 조금 더 큰 요청에도 재사용하도록 했습니다. 다만 그런 요청이 없으면 낭비가 됩니다. 중간 크기 요청은 여러 블록 분량을 함께 확보하고, 초기 공간은 작게 뒀습니다. 앞뒤 분할도 시도했지만 효과는 일정하지 않았습니다. 이런 숫자와 기준은 테스트로 조정했습니다.',
+        source:'현재 코드: align_up, extend_heap, mm_init, place · 크기 보정은 payload 32~2047 B에 한정 · 배수 확장은 MIN_BSIZE < 블록 크기 < 512 B에서 적용 · 136 B는 4 B 헤더와 8 B 정렬 포함 · 분할 정책의 개선 효과는 패턴에 따라 다름'
+      },
+      {
+        time:'약 15초',
+        text:'이번 주에는 개선의 근거를 구분하는 법을 배웠습니다. 논리적 개선은 줄어드는 작업과 지켜야 하는 전제를 확인했고, 휴리스틱은 개별 테스트로 조정했습니다. 좋은 테스트 결과가 모든 요청 패턴의 정답은 아니었습니다.',
+        source:'99점: 앞선 로컬 macOS 드라이버 측정 · 제공된 11개 traces 통과 · 다른 환경의 처리량은 달라질 수 있음'
+      }
+    ];
+    let index = 0;
+    const viewport = document.getElementById('viewport');
+    const deck = document.getElementById('deck');
+    const notes = document.getElementById('notes');
+    const notesButton = document.getElementById('toggleNotes');
+    function resize() {
+      const scale = Math.min(viewport.clientWidth / 1280, viewport.clientHeight / 720);
+      deck.style.transform = `scale(${scale})`;
+      deck.style.left = `${(viewport.clientWidth - 1280 * scale) / 2}px`;
+      deck.style.top = `${(viewport.clientHeight - 720 * scale) / 2}px`;
+    }
+    function show(n) {
+      index = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((slide, i) => {
+        slide.classList.toggle('active', i === index);
+        slide.setAttribute('aria-hidden', String(i !== index));
+      });
+      document.getElementById('counter').textContent = `${index + 1} / ${slides.length}`;
+      document.getElementById('prev').disabled = index === 0;
+      document.getElementById('next').disabled = index === slides.length - 1;
+      document.getElementById('noteTitle').textContent = `${index + 1}장 대본 · ${scripts[index].time} · 전체 약 2분`;
+      document.getElementById('noteText').textContent = scripts[index].text;
+      document.getElementById('noteSource').textContent = scripts[index].source;
+    }
+    function toggleNotes() {
+      const open = notes.classList.toggle('open');
+      notesButton.setAttribute('aria-expanded', String(open));
+      notes.setAttribute('aria-hidden', String(!open));
+    }
+    async function fullscreen() {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+        else alert('이 브라우저에서는 전체 화면 버튼을 지원하지 않습니다. 브라우저의 전체 화면 기능을 사용해주세요.');
+      } catch (_) { alert('브라우저의 전체 화면 기능을 사용해주세요.'); }
+    }
+    document.getElementById('prev').onclick = () => show(index - 1);
+    document.getElementById('next').onclick = () => show(index + 1);
+    notesButton.onclick = toggleNotes;
+    document.getElementById('fullscreen').onclick = fullscreen;
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (['ArrowRight','ArrowDown','PageDown'].includes(e.key) || (e.key === ' ' && e.target === document.body)) { e.preventDefault(); show(index + 1); }
+      if (['ArrowLeft','ArrowUp','PageUp'].includes(e.key)) { e.preventDefault(); show(index - 1); }
+      if (e.key === 'Home') { e.preventDefault(); show(0); }
+      if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
+      if (e.key.toLowerCase() === 'n') toggleNotes();
+      if (e.key.toLowerCase() === 'f') fullscreen();
+      if (e.key === 'Escape' && notes.classList.contains('open')) toggleNotes();
+    });
+    window.addEventListener('resize', resize);
+    document.addEventListener('fullscreenchange', resize);
+    show(0); resize();
+  </script>
+</body>
+</html>
